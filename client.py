@@ -3,41 +3,66 @@ import pickle
 import zlib
 import cv2
 import struct
+from os import walk
 
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
 MESSAGE = "Hello, World!"
+MESSAGE_2 = "Upload"
 
-BUFFER_SIZE = 8192
+BUFFER_SIZE = 4096
+BUFFER_FILE = 8192
 PAYLOAD_SIZE = struct.calcsize(">L")
 
-def receiveVideo(sock):
+TCP_IP = "127.0.0.1"
+TCP_PORT = 5014
+
+def receiveVideo(sock, nombreVideo):
+    isRecording = True
     while True:
         try:
+            print("Recibiendo frame...")
             packetSize, serverAddress = sock.recvfrom(PAYLOAD_SIZE)
             packetSize = struct.unpack(">L", packetSize)
 
             #print("Packet size", packetSize[0])
             #print("Packet size type", type(packetSize[0]))
             data = b""
+            print("Size:", packetSize[0])
             while len(data) < packetSize[0]:
                 newData, serverAddress = sock.recvfrom(BUFFER_SIZE)
                 #print(f"Receiving data: {newData}")
                 data = data + newData
                 #print("Total data received:", len(data))
 
+            print("Actual data size received:", len(data))
             frame = pickle.loads(zlib.decompress(data))
             #print(frame)
 
             #frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
-            cv2.imshow('ImageWindow', frame)
-            cv2.waitKey(1)
+            if isRecording == True:
+                cv2.imshow('ImageWindow', frame)
+            #cv2.waitKey(1)
 
+            if cv2.waitKey(25) & 0xFF == ord('q'):
+                sock.sendto("stop".encode(), (UDP_IP, UDP_PORT))
+                break
+            '''
+            if cv2.waitKey(25) & 0xFF == ord('p'):  # Pause
+                print("ENTRO A PAUSA")
+                isRecording = False
+            if cv2.waitKey(25) & 0xFF == ord('c'):  # Continue
+                print("ENTRO A CONTINUAR")
+                isRecording = True
+'''
             sendPing(sock)
 
         except socket.timeout:
             print("Socket timeout.")
             break
+
+    sock.close()
+    print("Cerrando socket de transmision streaming...")
 
 
 
@@ -52,34 +77,91 @@ def sendPing(sock):
     sock.sendto("alive".encode(), (UDP_IP, UDP_PORT))
 
 
-print ("UDP target IP:", UDP_IP)
-print ("UDP target port:", UDP_PORT)
-print ("message:", MESSAGE)
+def uploadVideo(sock, videoPath):
+    #Recibir el mensaje del servidor diciendo OK
+    print("Uploading video...")
+    message, serverAddress = sock.recvfrom(BUFFER_SIZE) #El servidor debe responder con un 'OK'
+    print("S:", message.decode())
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP
-#sock.settimeout(3)
+    sock.sendto("start".encode(), (UDP_IP, UDP_PORT))
 
-sock.sendto(MESSAGE.encode(), (UDP_IP, UDP_PORT))
+    message, serverAddress = sock.recvfrom(BUFFER_SIZE)  # El servidor debe responder con un 'OK'
 
-receiveVideo(sock)
-#createVideoFile(videoBytes)
+    #Abrir conexion TCP para enviar archivo
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((TCP_IP, TCP_PORT))
 
-sock.close()
+    nombre = videoPath.split('/')
+    nombre = nombre[len(nombre) - 1]  # Atrapo el nombre del video contenido en el path del mismo
 
-'''
-import cv2
-import numpy as np
+    s.sendall(nombre.encode()) # Se envia el nombre del video
 
-cap = cv2.VideoCapture(0)
+    file = open(videoPath, 'rb')
+    data = file.read()
+    file.close()
 
-while True:
-    ret, frame = cap.read()
-    cv2.imshow('frame', frame)
+    # Enviar el tamanio del archivo para que el servidor sepa cuanto toca leer
+    size = len(data)
+    print("Size:", size)
+    size = struct.pack(">L", size)
+    s.sendall(size)  # Envio el tamaño del video
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    s.sendall(data) #Enviamos el archivo
+
+    s.close()
+
+
+def initializeVideoUpload(videoName, comboFiles):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # UDP
+    sock.sendto(MESSAGE_2.encode(), (UDP_IP, UDP_PORT))
+
+    path = './videos/' + videoName
+    uploadVideo(sock, path)
+
+    videosList = grabVideosList()
+    print(videosList)
+    print(type(videosList))
+    print("Combo type:", type(comboFiles))
+    print("Combo values before,", comboFiles['values'])
+    comboFiles['values'] = videosList
+
+def initializeVideoStream(nombreVideo):
+    print("UDP target IP:", UDP_IP)
+    print("UDP target port:", UDP_PORT)
+    print("message:", MESSAGE)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # UDP
+    # sock.settimeout(3)
+
+    print(f"Video solicitado: {nombreVideo}")
+
+    sock.sendto(nombreVideo.encode(), (UDP_IP, UDP_PORT))
+
+    receiveVideo(sock, nombreVideo)
+    # createVideoFile(videoBytes)
+
+    sock.close()
+
+
+def grabVideosList():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # UDP
+    sock.sendto('videos-list'.encode(), (UDP_IP, UDP_PORT))
+
+    data, serverAddress = sock.recvfrom(BUFFER_SIZE)
+    videosList = pickle.loads(data)
+    print(videosList)
+    return videosList
+
+
+def grabMyVideosList():
+    f = []
+    for (dirpath, dirnames, filenames) in walk('./videos'):
+        f.extend(filenames)
         break
+    print(f)
+    return f
 
-cap.release()
-cv2.destroyAllWindows()
+#initializeVideoStream('video-5.mp4')
+#initializeVideoUpload()
+#initializeVideoStream()
 
-'''
