@@ -3,6 +3,8 @@ import pickle
 import zlib
 import cv2
 import struct
+import tkinter
+from tkinter import messagebox
 from os import walk
 
 UDP_IP = "127.0.0.1"
@@ -25,36 +27,33 @@ def receiveVideo(sock, nombreVideo):
             packetSize, serverAddress = sock.recvfrom(PAYLOAD_SIZE)
             packetSize = struct.unpack(">L", packetSize)
 
-            #print("Packet size", packetSize[0])
-            #print("Packet size type", type(packetSize[0]))
             data = b""
             print("Size:", packetSize[0])
             while len(data) < packetSize[0]:
                 newData, serverAddress = sock.recvfrom(BUFFER_SIZE)
-                #print(f"Receiving data: {newData}")
                 data = data + newData
-                #print("Total data received:", len(data))
 
             print("Actual data size received:", len(data))
             frame = pickle.loads(zlib.decompress(data))
-            #print(frame)
 
-            #frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
             if isRecording == True:
                 cv2.imshow('ImageWindow', frame)
-            #cv2.waitKey(1)
 
-            if cv2.waitKey(25) & 0xFF == ord('q'):
+            key = cv2.waitKey(1) & 0xff
+            if key == ord('p'):
+                print("PAUSE VIDEO")
+                while True:
+
+                    key2 = cv2.waitKey(1) or 0xff
+                    cv2.imshow('ImageWindow', frame)
+
+                    if key2 == ord('p'):
+                        print("PLAY VIDEO")
+                        break
+            if key == ord('q'):
                 sock.sendto("stop".encode(), (UDP_IP, UDP_PORT))
+                cv2.destroyAllWindows()
                 break
-            '''
-            if cv2.waitKey(25) & 0xFF == ord('p'):  # Pause
-                print("ENTRO A PAUSA")
-                isRecording = False
-            if cv2.waitKey(25) & 0xFF == ord('c'):  # Continue
-                print("ENTRO A CONTINUAR")
-                isRecording = True
-'''
             sendPing(sock)
 
         except socket.timeout:
@@ -63,8 +62,6 @@ def receiveVideo(sock, nombreVideo):
 
     sock.close()
     print("Cerrando socket de transmision streaming...")
-
-
 
 
 def createVideoFile(bytes):
@@ -109,6 +106,7 @@ def uploadVideo(sock, videoPath):
     s.sendall(data) #Enviamos el archivo
 
     s.close()
+    tkinter.messagebox.showinfo("Estado de solicitud", "El archivo fue recibido exitosamente")
 
 
 def initializeVideoUpload(videoName, comboFiles):
